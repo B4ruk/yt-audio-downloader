@@ -1,0 +1,13 @@
+YT Audio Downloader — Linux
+
+Instalar (adiciona ao menu de aplicativos):
+    ./install.sh
+
+Desinstalar:
+    ./uninstall.sh
+
+Usar sem instalar:
+    ./YT-Audio-Downloader
+
+Se aparecer "Permissão negada":
+    chmod +x install.sh uninstall.sh YT-Audio-Downloader

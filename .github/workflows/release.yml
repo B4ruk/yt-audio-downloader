@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP: YT-Audio-Downloader
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Versão
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dev"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Instalar dependências
+        run: pip install -r requirements-dev.txt
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Pacote Linux
+        if: matrix.platform == 'linux'
+        run: |
+          PKG="$APP-$VERSION-linux-x86_64"
+          mkdir -p "release/$PKG"
+          cp dist/$APP assets/icon.png packaging/linux/* LICENSE "release/$PKG/"
+          chmod +x "release/$PKG/$APP" "release/$PKG/"*.sh
+          cd release && zip -r "$PKG.zip" "$PKG" && rm -rf "$PKG"
+
+      - name: Pacote macOS
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p release
+          ditto -c -k --keepParent "dist/$APP.app" "release/$APP-$VERSION-macos-arm64.zip"
+
+      - name: Pacote Windows (portable)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Compress-Archive -Path "dist/$env:APP" -DestinationPath "release/$env:APP-$env:VERSION-windows-x64-portable.zip"
+
+      - name: Instalador Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" | Select-Object -First 1).FullName
+          & $iscc "/DAppVersion=$env:VERSION" packaging\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: release/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd release && sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
